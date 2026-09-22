@@ -1,3 +1,5 @@
+import { extractPolicyText, getTextHash } from "./extractor.js";
+
 const URL_PATTERNS = [
   "/privacy",
   "/legal",
@@ -63,6 +65,55 @@ export function detectPolicyPage() {
   };
 }
 
-const result = detectPolicyPage();
+/**
+ * Runs detection and, if the page looks like a policy page, extraction.
+ * Sends a single POLICY_ANALYZED message with the combined result either
+ * way, so the background service worker can still clear the badge on
+ * non-policy pages.
+ */
+async function runPipeline() {
+  const detection = detectPolicyPage();
 
-chrome.runtime.sendMessage({ type: "POLICY_DETECTED", data: result });
+  if (!detection.isPolicy) {
+    chrome.runtime.sendMessage({
+      type: "POLICY_ANALYZED",
+      data: {
+        isPolicy: false,
+        confidence: detection.confidence,
+        matchedSignals: detection.matchedSignals,
+        title: document.title ?? "",
+        text: "",
+        textHash: "",
+        textLength: 0,
+        extractionMethod: "skipped",
+      },
+    });
+    return;
+  }
+
+  const extraction = await extractPolicyText();
+  const textHash = extraction.text ? await getTextHash(extraction.text) : "";
+
+  chrome.runtime.sendMessage({
+    type: "POLICY_ANALYZED",
+    data: {
+      isPolicy: detection.isPolicy,
+      confidence: detection.confidence,
+      matchedSignals: detection.matchedSignals,
+      title: extraction.title,
+      text: extraction.text,
+      textHash,
+      textLength: extraction.length,
+      extractionMethod: extraction.extractionMethod,
+    },
+  });
+}
+
+// Guard on `window` (not a module-level variable) so the pipeline still
+// runs at most once per page even if this script is ever re-injected
+// programmatically into the same document — e.g. a future SPA
+// navigation/MutationObserver hook re-triggering detection.
+if (!window.__policylensAnalyzed) {
+  window.__policylensAnalyzed = true;
+  runPipeline();
+}

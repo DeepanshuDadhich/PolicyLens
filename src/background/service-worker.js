@@ -4,15 +4,26 @@ const BADGE_COLORS = {
   low: "#6B7280",
 };
 
+// tabId -> { isPolicy, confidence, matchedSignals, title, text, textHash, textLength, extractionMethod }
 const detectionResults = new Map();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type === "POLICY_DETECTED") {
+  if (message?.type === "POLICY_ANALYZED") {
     const tabId = sender.tab?.id;
-    const { isPolicy, confidence, matchedSignals } = message.data;
+    const { isPolicy, confidence, matchedSignals, title, text, textHash, textLength, extractionMethod } =
+      message.data;
 
     if (tabId !== undefined) {
-      detectionResults.set(tabId, { isPolicy, confidence, matchedSignals });
+      detectionResults.set(tabId, {
+        isPolicy,
+        confidence,
+        matchedSignals,
+        title,
+        text,
+        textHash,
+        textLength,
+        extractionMethod,
+      });
 
       if (isPolicy) {
         chrome.action.setBadgeText({ text: "!", tabId });
