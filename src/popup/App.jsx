@@ -14,7 +14,7 @@ const ERROR_MESSAGES = {
 };
 
 export default function App() {
-  const { viewState, analysisPhase, analysis, analysisSource, analysisTimestamp, errorInfo, retry } =
+  const { viewState, analysisPhase, analysis, analysisSource, analysisTimestamp, domain, errorInfo, retry } =
     usePolicyAnalysis();
 
   return (
@@ -55,7 +55,7 @@ export default function App() {
         )}
 
         {viewState === "success" && analysis && (
-          <AnalysisResults analysis={analysis} source={analysisSource} timestamp={analysisTimestamp} />
+          <AnalysisResults analysis={analysis} source={analysisSource} timestamp={analysisTimestamp} domain={domain} />
         )}
 
         {viewState === "error" && (

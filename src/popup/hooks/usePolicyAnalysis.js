@@ -13,6 +13,7 @@ export function usePolicyAnalysis() {
   const [analysis, setAnalysis] = useState(null);
   const [analysisSource, setAnalysisSource] = useState(null); // 'fresh' | 'cache' | null
   const [analysisTimestamp, setAnalysisTimestamp] = useState(null); // cache write time, only set when source === 'cache'
+  const [domain, setDomain] = useState(null);
   const [errorInfo, setErrorInfo] = useState(null);
   const tabIdRef = useRef(null);
 
@@ -73,6 +74,8 @@ export function usePolicyAnalysis() {
         const status = await chrome.runtime.sendMessage({ type: "GET_STATUS", tabId: tab.id });
         if (isCancelled) return;
 
+        setDomain(status?.domain ?? null);
+
         if (!status?.isPolicy) {
           setViewState("no-policy");
           return;
@@ -127,5 +130,14 @@ export function usePolicyAnalysis() {
     return () => chrome.runtime.onMessage.removeListener(handleMessage);
   }, []);
 
-  return { viewState, analysisPhase, analysis, analysisSource, analysisTimestamp, errorInfo, retry: requestAnalysis };
+  return {
+    viewState,
+    analysisPhase,
+    analysis,
+    analysisSource,
+    analysisTimestamp,
+    domain,
+    errorInfo,
+    retry: requestAnalysis,
+  };
 }

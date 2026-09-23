@@ -230,6 +230,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse?.({
         isPolicy: detection?.isPolicy ?? false,
         confidence: detection?.confidence ?? null,
+        domain: detection?.domain ?? null,
         hasApiKey: Boolean(cerebrasApiKey),
         analysisStatus: analysisState.get(tabId)?.status ?? null,
       });

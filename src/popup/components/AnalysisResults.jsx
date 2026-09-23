@@ -2,7 +2,7 @@ import RiskCard from "./RiskCard.jsx";
 import ListSection from "./ListSection.jsx";
 import RedFlagsSection from "./RedFlagsSection.jsx";
 
-export default function AnalysisResults({ analysis, source, timestamp }) {
+export default function AnalysisResults({ analysis, source, timestamp, domain }) {
   const { dataCollected, thirdPartySharing, retentionPolicy, userRights, redFlags, riskScore, riskJustification } =
     analysis;
 
@@ -13,6 +13,7 @@ export default function AnalysisResults({ analysis, source, timestamp }) {
         riskJustification={riskJustification}
         source={source}
         timestamp={timestamp}
+        domain={domain}
       />
 
       <RedFlagsSection redFlags={redFlags} />
