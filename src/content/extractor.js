@@ -1,4 +1,5 @@
 import { Readability } from "@mozilla/readability";
+import { logExtractionResult } from "./debug-log.js"; // TEMP — remove after QA
 
 // Lines shorter than this are treated as nav/menu noise in the fallback path.
 const MIN_FALLBACK_LINE_LENGTH = 10;
@@ -18,19 +19,23 @@ function cleanFallbackText(rawText) {
 
 /**
  * Falls back to a plain document.body.innerText dump when Readability
- * can't produce usable content (common on SPAs or heavily JS-rendered
- * pages where the article isn't in a recognizable content structure).
+ * can't produce usable content. Always logs WHY it was reached, so a
+ * fallback result is never silently indistinguishable from a real failure.
  */
-function extractFallbackText() {
+function extractFallbackText(reason) {
+  console.warn(`[PolicyLens] Falling back to innerText extraction — reason: ${reason}`);
+
   const rawText = document.body?.innerText ?? "";
   const text = cleanFallbackText(rawText);
 
-  return {
+  const result = {
     title: document.title ?? "",
     text,
     length: text.length,
     extractionMethod: "fallback",
   };
+  logExtractionResult(result); // TEMP
+  return result;
 }
 
 /**
@@ -42,29 +47,60 @@ function extractFallbackText() {
  */
 export async function extractPolicyText() {
   try {
+    if (typeof Readability !== "function") {
+      return extractFallbackText(
+        `Readability import is not a constructor (typeof === "${typeof Readability}") — check the bundler output`
+      );
+    }
+
     // Readability mutates the DOM it's given, so we hand it a clone and
     // leave the live page untouched.
     const clonedDocument = document.cloneNode(true);
-    const article = new Readability(clonedDocument).parse();
 
-    if (article?.textContent && article.textContent.trim().length > 0) {
-      const text = article.textContent.trim();
-      return {
-        title: article.title ?? document.title ?? "",
-        text,
-        length: text.length,
-        extractionMethod: "readability",
-      };
+    if (!clonedDocument?.documentElement) {
+      return extractFallbackText(
+        "document.cloneNode(true) produced no documentElement — Readability would reject it"
+      );
     }
 
-    // Readability parsed but found nothing usable — fall back.
-    return extractFallbackText();
-  } catch (error) {
+    // Only the Readability call itself lives in this try. Anything after it
+    // (logging, object building) must NOT be able to throw its way into the
+    // fallback path and disguise a successful parse as a failure.
+    let article;
     try {
-      return extractFallbackText();
-    } catch {
-      return { title: "", text: "", length: 0, extractionMethod: "failed" };
+      article = new Readability(clonedDocument).parse();
+    } catch (error) {
+      console.error("[PolicyLens] Readability.parse() threw:", error);
+      return extractFallbackText(
+        `Readability.parse() threw ${error?.name ?? "Error"}: ${error?.message ?? String(error)}`
+      );
     }
+
+    if (article === null) {
+      return extractFallbackText(
+        "Readability.parse() returned null — no article candidate scored high enough on this page"
+      );
+    }
+
+    const text = article.textContent?.trim() ?? "";
+
+    if (text.length === 0) {
+      return extractFallbackText(
+        `Readability returned an article object but textContent was empty (title: "${article.title ?? ""}", length: ${article.length ?? 0})`
+      );
+    }
+
+    const result = {
+      title: article.title ?? document.title ?? "",
+      text,
+      length: text.length,
+      extractionMethod: "readability",
+    };
+    logExtractionResult(result); // TEMP
+    return result;
+  } catch (error) {
+    console.error("[PolicyLens] Extraction failed entirely:", error);
+    return { title: "", text: "", length: 0, extractionMethod: "failed" };
   }
 }
 
