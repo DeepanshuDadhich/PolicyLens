@@ -1,5 +1,4 @@
 import { Readability } from "@mozilla/readability";
-import { logExtractionResult } from "./debug-log.js"; // TEMP — remove after QA
 
 // Lines shorter than this are treated as nav/menu noise in the fallback path.
 const MIN_FALLBACK_LINE_LENGTH = 10;
@@ -34,7 +33,6 @@ function extractFallbackText(reason) {
     length: text.length,
     extractionMethod: "fallback",
   };
-  logExtractionResult(result); // TEMP
   return result;
 }
 
@@ -96,7 +94,6 @@ export async function extractPolicyText() {
       length: text.length,
       extractionMethod: "readability",
     };
-    logExtractionResult(result); // TEMP
     return result;
   } catch (error) {
     console.error("[PolicyLens] Extraction failed entirely:", error);
