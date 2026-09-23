@@ -1,6 +1,33 @@
 import RiskCard from "./RiskCard.jsx";
 import ListSection from "./ListSection.jsx";
 import RedFlagsSection from "./RedFlagsSection.jsx";
+import RetentionInfo from "./RetentionInfo.jsx";
+
+// Data-Collected-specific: maps a free-text category (as written by the
+// model, e.g. "Precise location data") to a representative icon. This only
+// makes sense for dataCollected items — thirdPartySharing/userRights have
+// no comparable "category" concept, so ListSection's getIcon prop is left
+// unset for those two sections.
+const CATEGORY_ICON_KEYWORDS = [
+  { keyword: "location", icon: "📍" },
+  { keyword: "browsing", icon: "🌐" },
+  { keyword: "history", icon: "🌐" },
+  { keyword: "device", icon: "📱" },
+  { keyword: "email", icon: "✉️" },
+  { keyword: "name", icon: "👤" },
+  { keyword: "identity", icon: "👤" },
+  { keyword: "financial", icon: "💳" },
+  { keyword: "payment", icon: "💳" },
+  { keyword: "health", icon: "❤️" },
+  { keyword: "medical", icon: "❤️" },
+  { keyword: "biometric", icon: "❤️" },
+];
+
+function getDataCollectedIcon(item) {
+  const category = item.category?.toLowerCase() ?? "";
+  const match = CATEGORY_ICON_KEYWORDS.find(({ keyword }) => category.includes(keyword));
+  return match ? match.icon : "📄";
+}
 
 export default function AnalysisResults({ analysis, source, timestamp, domain }) {
   const { dataCollected, thirdPartySharing, retentionPolicy, userRights, redFlags, riskScore, riskJustification } =
@@ -22,11 +49,11 @@ export default function AnalysisResults({ analysis, source, timestamp, domain })
         title="Data Collected"
         emptyText="No specific data collection described."
         items={dataCollected}
+        getIcon={getDataCollectedIcon}
         renderItem={(item) => (
           <>
             <p className="font-medium text-gray-100">{item.category}</p>
             <p className="mt-1 text-sm text-gray-300">{item.details}</p>
-            <p className="mt-1 text-xs italic text-gray-500">&ldquo;{item.sourceClause}&rdquo;</p>
           </>
         )}
       />
@@ -39,7 +66,6 @@ export default function AnalysisResults({ analysis, source, timestamp, domain })
           <>
             <p className="font-medium text-gray-100">{item.recipient}</p>
             <p className="mt-1 text-sm text-gray-300">{item.purpose}</p>
-            <p className="mt-1 text-xs italic text-gray-500">&ldquo;{item.sourceClause}&rdquo;</p>
           </>
         )}
       />
@@ -52,18 +78,11 @@ export default function AnalysisResults({ analysis, source, timestamp, domain })
           <>
             <p className="font-medium text-gray-100">{item.right}</p>
             <p className="mt-1 text-sm text-gray-300">{item.howToExercise}</p>
-            <p className="mt-1 text-xs italic text-gray-500">&ldquo;{item.sourceClause}&rdquo;</p>
           </>
         )}
       />
 
-      <section className="mt-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">Data Retention</h2>
-        <div className="mt-2 rounded-md bg-gray-800 p-3">
-          <p className="text-sm text-gray-300">{retentionPolicy.summary}</p>
-          <p className="mt-1 text-xs italic text-gray-500">&ldquo;{retentionPolicy.sourceClause}&rdquo;</p>
-        </div>
-      </section>
+      <RetentionInfo retentionPolicy={retentionPolicy} />
     </div>
   );
 }
