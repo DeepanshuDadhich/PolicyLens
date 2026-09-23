@@ -33,8 +33,9 @@ async function evictOldestEntries(count) {
 
 /**
  * Looks up a cached analysis for the given domain + policy text hash.
- * Returns null on a miss or if the cached entry is older than the 30-day TTL
- * (an expired entry is opportunistically deleted rather than left behind).
+ * Returns { analysis, timestamp } on a hit, or null on a miss or if the
+ * cached entry is older than the 30-day TTL (an expired entry is
+ * opportunistically deleted rather than left behind).
  */
 export async function getCachedAnalysis(domain, textHash) {
   const key = buildCacheKey(domain, textHash);
@@ -51,7 +52,7 @@ export async function getCachedAnalysis(domain, textHash) {
     return null;
   }
 
-  return entry.analysis;
+  return { analysis: entry.analysis, timestamp: entry.timestamp };
 }
 
 /**

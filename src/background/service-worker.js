@@ -98,9 +98,14 @@ async function runAnalysis(tabId, detection, apiKey) {
 
   const cached = await getCachedAnalysis(domain, textHash);
   if (cached) {
-    analysisState.set(tabId, { status: "done", analysis: cached, source: "cache" });
+    analysisState.set(tabId, {
+      status: "done",
+      analysis: cached.analysis,
+      source: "cache",
+      timestamp: cached.timestamp,
+    });
     broadcastAnalysisState(tabId);
-    return cached;
+    return cached.analysis;
   }
 
   await reserveRateLimitSlot(() => {
