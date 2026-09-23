@@ -1,8 +1,7 @@
-import { useState } from "react";
 import AccordionSection from "./AccordionSection.jsx";
+import SourceQuote from "./SourceQuote.jsx";
 
 function ListItem({ item, renderItem, getIcon }) {
-  const [showSource, setShowSource] = useState(false);
   const icon = getIcon?.(item);
 
   return (
@@ -16,23 +15,7 @@ function ListItem({ item, renderItem, getIcon }) {
         <div className="min-w-0 flex-1">{renderItem(item)}</div>
       </div>
 
-      {item.sourceClause && (
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => setShowSource((prev) => !prev)}
-            className="text-xs font-medium text-teal-400 hover:text-teal-300"
-          >
-            {showSource ? "Hide source" : "View source"}
-          </button>
-
-          {showSource && (
-            <blockquote className="mt-2 border-l-2 border-gray-600 bg-gray-900/60 px-3 py-2 text-xs italic text-gray-400">
-              &ldquo;{item.sourceClause}&rdquo;
-            </blockquote>
-          )}
-        </div>
-      )}
+      <SourceQuote text={item.sourceClause} />
     </li>
   );
 }

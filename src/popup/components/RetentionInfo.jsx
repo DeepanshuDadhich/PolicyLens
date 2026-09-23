@@ -1,4 +1,4 @@
-import { useState } from "react";
+import SourceQuote from "./SourceQuote.jsx";
 
 /**
  * Non-collapsible retention summary block. Its "View source" disclosure
@@ -7,7 +7,6 @@ import { useState } from "react";
  * consistency across the popup.
  */
 export default function RetentionInfo({ retentionPolicy }) {
-  const [showSource, setShowSource] = useState(false);
   const { summary, sourceClause } = retentionPolicy;
 
   return (
@@ -16,23 +15,7 @@ export default function RetentionInfo({ retentionPolicy }) {
       <div className="mt-2 rounded-md bg-gray-800 p-3">
         <p className="text-sm text-gray-300">{summary}</p>
 
-        {sourceClause && (
-          <div className="mt-2">
-            <button
-              type="button"
-              onClick={() => setShowSource((prev) => !prev)}
-              className="text-xs font-medium text-teal-400 hover:text-teal-300"
-            >
-              {showSource ? "Hide source" : "View source"}
-            </button>
-
-            {showSource && (
-              <blockquote className="mt-2 border-l-2 border-gray-600 bg-gray-900/60 px-3 py-2 text-xs italic text-gray-400">
-                &ldquo;{sourceClause}&rdquo;
-              </blockquote>
-            )}
-          </div>
-        )}
+        <SourceQuote text={sourceClause} />
       </div>
     </section>
   );
