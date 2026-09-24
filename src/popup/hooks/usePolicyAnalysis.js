@@ -17,7 +17,9 @@ export function usePolicyAnalysis() {
   const [errorInfo, setErrorInfo] = useState(null);
   const tabIdRef = useRef(null);
 
-  const requestAnalysis = useCallback(async () => {
+  // messageType is either "REQUEST_ANALYSIS" (cache-aware) or "RE_ANALYZE"
+  // (clears this domain's cache first, forcing a fresh API call).
+  const runAnalysisRequest = useCallback(async (messageType) => {
     const tabId = tabIdRef.current;
     if (tabId == null) {
       return;
@@ -30,7 +32,7 @@ export function usePolicyAnalysis() {
     setErrorInfo(null);
 
     try {
-      const response = await chrome.runtime.sendMessage({ type: "REQUEST_ANALYSIS", tabId });
+      const response = await chrome.runtime.sendMessage({ type: messageType, tabId });
 
       if (response?.status === "error" && response.error === "NO_KEY") {
         setViewState("no-key");
@@ -50,11 +52,16 @@ export function usePolicyAnalysis() {
       setAnalysisSource((prev) => prev ?? "fresh");
       setViewState("success");
     } catch (error) {
-      console.error("[PolicyLens] REQUEST_ANALYSIS failed:", error);
+      console.error(`[PolicyLens] ${messageType} failed:`, error);
       setErrorInfo({ error: "NETWORK_ERROR", message: "Could not reach the extension background." });
       setViewState("error");
     }
   }, []);
+
+  // Wrapped as zero-arg callbacks so passing them straight to onClick can't
+  // leak the click event in as the messageType argument.
+  const retry = useCallback(() => runAnalysisRequest("REQUEST_ANALYSIS"), [runAnalysisRequest]);
+  const reAnalyze = useCallback(() => runAnalysisRequest("RE_ANALYZE"), [runAnalysisRequest]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -86,7 +93,7 @@ export function usePolicyAnalysis() {
           return;
         }
 
-        await requestAnalysis();
+        await runAnalysisRequest("REQUEST_ANALYSIS");
       } catch (error) {
         if (isCancelled) return;
         console.error("[PolicyLens] Failed to initialize popup:", error);
@@ -100,7 +107,7 @@ export function usePolicyAnalysis() {
     return () => {
       isCancelled = true;
     };
-  }, [requestAnalysis]);
+  }, [runAnalysisRequest]);
 
   useEffect(() => {
     function handleMessage(message) {
@@ -138,6 +145,7 @@ export function usePolicyAnalysis() {
     analysisTimestamp,
     domain,
     errorInfo,
-    retry: requestAnalysis,
+    retry,
+    reAnalyze,
   };
 }
