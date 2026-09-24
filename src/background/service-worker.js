@@ -1,4 +1,4 @@
-import { analyzePolicy } from "./cerebras-service.js";
+import { analyzePolicy } from "./gemini-service.js";
 import { getCachedAnalysis, setCachedAnalysis, clearCacheForDomain } from "../utils/cache.js";
 
 const BADGE_COLORS = {
@@ -29,8 +29,49 @@ const inFlightAnalyses = new Map();
 // limit..." instead of a generic spinner.
 const analysisState = new Map();
 
-const CEREBRAS_RPM_LIMIT = 5;
+// UNVERIFIED FOR GEMINI — TODO: replace with the real number.
+// This 30 is Groq's confirmed RPM for openai/gpt-oss-120b (the previous
+// active provider), left in place only as a stopgap so the queue has some
+// bound rather than none. It is NOT Gemini's actual limit. Google no longer
+// publishes free-tier RPM/TPM/RPD figures anywhere reachable without a
+// login (not in GET .../v1beta/models, not in live response headers, not
+// on the public rate-limits docs page) — the real number is visible only
+// at https://aistudio.google.com/rate-limit while signed in. Replace this
+// value once that's checked; do not treat 30 as confirmed for Gemini.
+const ACTIVE_PROVIDER_RPM_LIMIT = 30;
 const RATE_LIMIT_WINDOW_MS = 60_000;
+
+// Gemini's free-tier RPD (requests per day). Unlike ACTIVE_PROVIDER_RPM_LIMIT,
+// this isn't abstracted as provider-neutral yet — the storage key itself
+// ("geminiRequestCount_...") is Gemini-specific by design. A future
+// provider swap would need to generalize this block too.
+const GEMINI_RPD_LIMIT = 20;
+
+// Local calendar date (not UTC) so the count resets at the user's own
+// midnight, matching what "20 scans per day" intuitively means to them.
+function getTodayDateKey() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+async function getDailyRequestCount() {
+  const key = `geminiRequestCount_${getTodayDateKey()}`;
+  const result = await chrome.storage.local.get(key);
+  return result[key] ?? 0;
+}
+
+// Awaited (not fire-and-forget like setCachedAnalysis) so the write
+// completes before the message response resolves — undercounting this
+// silently loosens the daily cap, which is a worse failure mode than the
+// minor delay of waiting on one local storage write.
+async function incrementDailyRequestCount() {
+  const key = `geminiRequestCount_${getTodayDateKey()}`;
+  const current = await getDailyRequestCount();
+  await chrome.storage.local.set({ [key]: current + 1 });
+}
 
 // Timestamps (ms) of the last calls into analyzePolicy(), for the sliding
 // 60s window. Note this counts calls to the wrapper, not raw HTTP requests —
@@ -48,7 +89,7 @@ function sleep(ms) {
 }
 
 /**
- * Resolves once it's safe to make a Cerebras call, having reserved a slot
+ * Resolves once it's safe to make an API call to the active provider, having reserved a slot
  * in requestTimestamps. Calls onWait() the first time this particular
  * caller actually has to wait for a slot (i.e. was queued, not immediate).
  *
@@ -66,7 +107,7 @@ function reserveRateLimitSlot(onWait) {
       const now = Date.now();
       requestTimestamps = requestTimestamps.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
 
-      if (requestTimestamps.length < CEREBRAS_RPM_LIMIT) {
+      if (requestTimestamps.length < ACTIVE_PROVIDER_RPM_LIMIT) {
         requestTimestamps.push(Date.now());
         return;
       }
@@ -108,6 +149,20 @@ async function runAnalysis(tabId, detection, apiKey) {
     return cached.analysis;
   }
 
+  const dailyCount = await getDailyRequestCount();
+  if (dailyCount >= GEMINI_RPD_LIMIT) {
+    // Skip the rate-limit reservation and the API call entirely — this
+    // request cannot succeed today regardless of how long it waits.
+    const limitResult = {
+      error: "DAILY_LIMIT",
+      message:
+        "You've used all 20 free scans for today. Try again tomorrow, or revisit a site you've already scanned (cached results are still free).",
+    };
+    analysisState.set(tabId, { status: "error", error: limitResult.error, message: limitResult.message });
+    broadcastAnalysisState(tabId);
+    return limitResult;
+  }
+
   await reserveRateLimitSlot(() => {
     analysisState.set(tabId, { status: "queued" });
     broadcastAnalysisState(tabId);
@@ -124,6 +179,9 @@ async function runAnalysis(tabId, detection, apiKey) {
     setCachedAnalysis(domain, textHash, result).catch((error) => {
       console.error("[PolicyLens] Failed to cache analysis result:", error);
     });
+    // Only a successful FRESH call counts against the daily quota — cache
+    // hits return before this point and never reach here.
+    await incrementDailyRequestCount();
     analysisState.set(tabId, { status: "done", analysis: result, source: "fresh" });
   }
   broadcastAnalysisState(tabId);
@@ -138,8 +196,8 @@ async function handleAnalysisRequest(tabId, sendResponse, { forceRefresh = false
     return;
   }
 
-  const { cerebrasApiKey } = await chrome.storage.sync.get("cerebrasApiKey");
-  if (!cerebrasApiKey) {
+  const { geminiApiKey } = await chrome.storage.sync.get("geminiApiKey");
+  if (!geminiApiKey) {
     // No cache lookup, no rate-limit slot — this request can't succeed anyway.
     sendResponse({ status: "error", error: "NO_KEY" });
     return;
@@ -156,7 +214,7 @@ async function handleAnalysisRequest(tabId, sendResponse, { forceRefresh = false
       // RE_ANALYZE's whole point is to bypass any cached result.
       await clearCacheForDomain(detection.domain);
     }
-    return runAnalysis(tabId, detection, cerebrasApiKey);
+    return runAnalysis(tabId, detection, geminiApiKey);
   })().finally(() => {
     inFlightAnalyses.delete(tabId);
   });
@@ -226,12 +284,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = message.tabId ?? sender.tab?.id;
     (async () => {
       const detection = detectionResults.get(tabId);
-      const { cerebrasApiKey } = await chrome.storage.sync.get("cerebrasApiKey");
+      const { geminiApiKey } = await chrome.storage.sync.get("geminiApiKey");
       sendResponse?.({
         isPolicy: detection?.isPolicy ?? false,
         confidence: detection?.confidence ?? null,
         domain: detection?.domain ?? null,
-        hasApiKey: Boolean(cerebrasApiKey),
+        hasApiKey: Boolean(geminiApiKey),
         analysisStatus: analysisState.get(tabId)?.status ?? null,
       });
     })();
