@@ -3,18 +3,28 @@ import { SYSTEM_PROMPT, buildUserPrompt } from "../utils/prompts.js";
 // Model confirmed live against GET .../v1beta/models on 2026-09-24 — see the
 // PR discussion for the full list. gemini-2.5-flash (the seemingly obvious
 // "stable" choice) returned 404 "no longer available to new users; use
-// models/gemini-3.6-flash", so that redirect is the actual source of truth
-// here, not a guess.
+// models/gemini-3.6-flash", so that redirect was the original source of
+// truth here, not a guess.
+//
+// Switched from gemini-3.6-flash to gemini-3.5-flash: 3.6-flash returned
+// repeated 503 "high demand" errors during live testing, while 3.5-flash
+// (confirmed present in the same /v1beta/models listing, same
+// inputTokenLimit) responded reliably. Both are "3.x flash" siblings
+// outside anything in this model's training data — 3.5-flash's own
+// long-term availability is no more independently verified than 3.6's was;
+// this swap is based on observed reliability during testing, not a
+// stability guarantee from Google.
 const GEMINI_ENDPOINT_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-const MODEL = "gemini-3.6-flash";
+const MODEL = "gemini-3.5-flash";
 const MAX_OUTPUT_TOKENS = 2048;
 
 // Gemini's rate-limit numbers are no longer published globally — Google's
 // docs page states they're account/tier-specific and viewable only in each
 // user's own AI Studio dashboard. No TPM figure here is independently
 // verified; the truncation limit below is instead sized against the one
-// number that IS confirmed live: gemini-3.6-flash's inputTokenLimit of
-// 1,048,576 tokens (from the /v1beta/models response).
+// number that IS confirmed live: gemini-3.5-flash's inputTokenLimit of
+// 1,048,576 tokens (from the /v1beta/models response — identical to
+// gemini-3.6-flash's).
 const CONFIRMED_INPUT_TOKEN_LIMIT = 1_048_576;
 
 // Fixed overhead per request: SYSTEM_PROMPT (~3,107 tokens, measured) +
@@ -36,6 +46,46 @@ const MAX_POLICY_TEXT_LENGTH = 300_000;
 
 const VALID_SEVERITIES = ["high", "medium", "low"];
 const VALID_RISK_SCORES = ["A", "B", "C", "D", "F"];
+
+// Retry-with-backoff specifically for HTTP 503 ("currently experiencing
+// high demand" — confirmed live to occur even on well-formed, correctly
+// sized requests, independent of which gemini-3.x-flash model is named).
+// This is separate from and unrelated to the parse-failure retry in
+// analyzePolicy() below. 3 retries (4 attempts total), worst case
+// 2s + 5s + 10s = 17s of pure waiting — acceptable against the MV3
+// service-worker's ~5-minute held-open-response allowance discussed
+// elsewhere in this project, but not free, so it's bounded rather than
+// unbounded/exponential-without-a-cap.
+const SERVER_ERROR_RETRY_DELAYS_MS = [2000, 5000, 10000];
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Fetches, retrying only on HTTP 503. Every other outcome — 2xx, 429,
+ * 401/403, 400, or any other 5xx — returns immediately on the first
+ * attempt with no extra retry here (buildHttpError/analyzePolicy's
+ * existing single-attempt handling for those is unchanged).
+ */
+async function fetchWithServerErrorRetry(url, options) {
+  let response = await fetch(url, options);
+
+  for (
+    let retryNumber = 1;
+    response.status === 503 && retryNumber <= SERVER_ERROR_RETRY_DELAYS_MS.length;
+    retryNumber++
+  ) {
+    const delayMs = SERVER_ERROR_RETRY_DELAYS_MS[retryNumber - 1];
+    console.log(
+      `[PolicyLens] Gemini returned 503 (high demand) — retry ${retryNumber}/${SERVER_ERROR_RETRY_DELAYS_MS.length} in ${delayMs}ms.`
+    );
+    await sleep(delayMs);
+    response = await fetch(url, options);
+  }
+
+  return response;
+}
 
 /**
  * Quick 4-chars-per-token approximation. Used only to log an estimate
@@ -195,7 +245,7 @@ async function requestAnalysis(policyText, apiKey) {
   const combinedPrompt = `${SYSTEM_PROMPT}\n\n${userPromptContent}`;
   const estimatedTotal = estimateTokens(combinedPrompt) + MAX_OUTPUT_TOKENS;
 
-  const response = await fetch(
+  const response = await fetchWithServerErrorRetry(
     `${GEMINI_ENDPOINT_BASE}/${MODEL}:generateContent?key=${apiKey}`,
     {
       method: "POST",
@@ -206,11 +256,13 @@ async function requestAnalysis(policyText, apiKey) {
           responseMimeType: "application/json",
           temperature: 0.1,
           maxOutputTokens: MAX_OUTPUT_TOKENS,
-          // Confirmed live: gemini-3.6-flash has "thinking" enabled by
-          // default, and its hidden reasoning tokens count against
-          // maxOutputTokens. Without this, a test call spent 181 of a
-          // 200-token budget on invisible "thoughts" and nearly hit
-          // finishReason: MAX_TOKENS before the visible JSON even started.
+          // Confirmed live for BOTH gemini-3.6-flash and gemini-3.5-flash
+          // (tested separately, not assumed identical): "thinking" is
+          // enabled by default, and its hidden reasoning tokens count
+          // against maxOutputTokens. Without this, a 3.5-flash test call
+          // spent 192 of a 200-token budget on invisible "thoughts" and
+          // left only 4 tokens for visible output — the response was cut
+          // off after literally "Here is", not even valid JSON.
           // Setting thinkingBudget: 0 removed the thoughtsTokenCount field
           // entirely and returned finishReason: STOP. This is an API
           // parameter, not a prompt instruction — SYSTEM_PROMPT's
