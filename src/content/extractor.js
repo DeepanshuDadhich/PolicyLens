@@ -51,26 +51,29 @@ export async function extractPolicyText() {
       );
     }
 
-    // Readability mutates the DOM it's given, so we hand it a clone and
-    // leave the live page untouched.
-    const clonedDocument = document.cloneNode(true);
-
-    if (!clonedDocument?.documentElement) {
-      return extractFallbackText(
-        "document.cloneNode(true) produced no documentElement — Readability would reject it"
-      );
-    }
-
-    // Only the Readability call itself lives in this try. Anything after it
-    // (logging, object building) must NOT be able to throw its way into the
-    // fallback path and disguise a successful parse as a failure.
+    // The clone step lives in the SAME try as parse(), not before it:
+    // document.cloneNode(true) can itself throw on pages using Custom
+    // Elements (e.g. "Cannot read properties of null (reading
+    // '__CE_registry')" — seen on policies.google.com/privacy), and a
+    // thrown clone should fall back exactly like a thrown parse(), not
+    // skip straight to the outer "failed" result. Readability mutates the
+    // DOM it's given, so cloning is still necessary to leave the live page
+    // untouched.
     let article;
     try {
+      const clonedDocument = document.cloneNode(true);
+
+      if (!clonedDocument?.documentElement) {
+        return extractFallbackText(
+          "document.cloneNode(true) produced no documentElement — Readability would reject it"
+        );
+      }
+
       article = new Readability(clonedDocument).parse();
     } catch (error) {
-      console.error("[PolicyLens] Readability.parse() threw:", error);
+      console.error("[PolicyLens] Readability clone/parse step threw:", error);
       return extractFallbackText(
-        `Readability.parse() threw ${error?.name ?? "Error"}: ${error?.message ?? String(error)}`
+        `Readability threw an exception: ${error?.name ?? "Error"}: ${error?.message ?? String(error)}`
       );
     }
 
